@@ -460,14 +460,17 @@ async def cmd_unmask(message: types.Message):
     user_info = db.get_user_info(fb['user_id'])
     warnings = db.get_warning_count(fb['user_id'])
 
+    uname = user_info.get('username') or "yo'q"
+    banned_text = "Ha" if user_info.get('is_banned') else "Yo'q"
+
     text = (
         f"🔍 <b>Feedback #{fb_id} — Foydalanuvchi ma'lumotlari</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 Telegram ID: <code>{fb['user_id']}</code>\n"
         f"👤 Ism: {user_info.get('first_name', '?')} {user_info.get('last_name') or ''}\n"
-        f"📱 Username: @{user_info.get('username') or 'yo\'q'}\n"
+        f"📱 Username: @{uname}\n"
         f"⚠️ Ogohlantirishlar: {warnings}\n"
-        f"🚫 Bloklangan: {'Ha' if user_info.get('is_banned') else 'Yo\\'q'}\n"
+        f"🚫 Bloklangan: {banned_text}\n"
         f"\n📝 Feedback: {fb['text'][:500]}\n"
         f"📅 Sana: {fb['created_at']}\n"
     )
