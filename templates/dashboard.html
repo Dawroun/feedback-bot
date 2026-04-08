@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ center_name }} — Feedback Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #f8f9fa; --card: #ffffff; --text: #1a1a2e;
+            --muted: #6c757d; --border: #e9ecef;
+            --green: #28a745; --red: #dc3545; --blue: #007bff;
+            --amber: #ffc107; --teal: #20c997;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text);
+            line-height: 1.6; padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        /* Header */
+        .header {
+            text-align: center; margin-bottom: 32px;
+            padding: 24px; background: var(--card);
+            border-radius: 16px; border: 1px solid var(--border);
+        }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header p { color: var(--muted); margin-top: 4px; }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px; margin-bottom: 32px;
+        }
+        .stat-card {
+            background: var(--card); border-radius: 12px;
+            padding: 20px; text-align: center;
+            border: 1px solid var(--border);
+        }
+        .stat-card .number {
+            font-size: 36px; font-weight: 700; line-height: 1.2;
+        }
+        .stat-card .label {
+            font-size: 13px; color: var(--muted);
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .stat-card.positive .number { color: var(--green); }
+        .stat-card.negative .number { color: var(--red); }
+        .stat-card.neutral .number { color: var(--amber); }
+        .stat-card.total .number { color: var(--blue); }
+
+        /* Charts Grid */
+        .charts-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 24px; margin-bottom: 32px;
+        }
+        @media (max-width: 768px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+        .chart-card {
+            background: var(--card); border-radius: 12px;
+            padding: 24px; border: 1px solid var(--border);
+        }
+        .chart-card h3 {
+            font-size: 16px; font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        /* Filters */
+        .filters {
+            display: flex; gap: 12px; margin-bottom: 24px;
+            flex-wrap: wrap; align-items: center;
+        }
+        .filters select, .filters button {
+            padding: 8px 16px; border-radius: 8px;
+            border: 1px solid var(--border); background: var(--card);
+            font-size: 14px; cursor: pointer;
+        }
+        .filters button.active {
+            background: var(--blue); color: white; border-color: var(--blue);
+        }
+
+        /* Feedback Table */
+        .table-card {
+            background: var(--card); border-radius: 12px;
+            padding: 24px; border: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        .table-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border);
+             color: var(--muted); font-weight: 600; font-size: 12px;
+             text-transform: uppercase; letter-spacing: 0.5px; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        tr:hover { background: #f8f9fa; }
+
+        /* Badges */
+        .badge {
+            display: inline-block; padding: 3px 10px;
+            border-radius: 20px; font-size: 12px; font-weight: 600;
+        }
+        .badge.positive { background: #d4edda; color: #155724; }
+        .badge.negative { background: #f8d7da; color: #721c24; }
+        .badge.neutral { background: #fff3cd; color: #856404; }
+        .badge.voice { background: #d1ecf1; color: #0c5460; }
+        .badge.text { background: #e2e3e5; color: #383d41; }
+
+        /* Progress bar */
+        .progress-bar {
+            height: 8px; background: var(--border); border-radius: 4px;
+            overflow: hidden; margin-top: 8px;
+        }
+        .progress-bar .fill {
+            height: 100%; border-radius: 4px; transition: width 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>{{ center_name }}</h1>
+            <p>Feedback Dashboard — Ota-onalar fikr-mulohazasi</p>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <div class="number">{{ stats.total }}</div>
+                <div class="label">Jami feedback</div>
+            </div>
+            <div class="stat-card positive">
+                <div class="number">{{ stats.positive }}</div>
+                <div class="label">Ijobiy</div>
+                <div class="progress-bar">
+                    <div class="fill" style="width:{{ (stats.positive / stats.total * 100) if stats.total > 0 else 0 }}%; background:var(--green)"></div>
+                </div>
+            </div>
+            <div class="stat-card negative">
+                <div class="number">{{ stats.negative }}</div>
+                <div class="label">Salbiy</div>
+                <div class="progress-bar">
+                    <div class="fill" style="width:{{ (stats.negative / stats.total * 100) if stats.total > 0 else 0 }}%; background:var(--red)"></div>
+                </div>
+            </div>
+            <div class="stat-card neutral">
+                <div class="number">{{ stats.neutral }}</div>
+                <div class="label">Neytral</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Sentiment taqsimoti</h3>
+                <canvas id="sentimentChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Oxirgi 30 kun dinamikasi</h3>
+                <canvas id="dailyChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Kurslar bo'yicha</h3>
+                <canvas id="courseChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Feedback turi</h3>
+                <canvas id="typeChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <select id="filterCourse" onchange="filterFeedbacks()">
+                <option value="">Barcha kurslar</option>
+                {% for c in courses %}
+                <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+            </select>
+            <button class="active" onclick="filterSentiment(this, '')">Hammasi</button>
+            <button onclick="filterSentiment(this, 'positive')">Ijobiy</button>
+            <button onclick="filterSentiment(this, 'negative')">Salbiy</button>
+            <button onclick="filterSentiment(this, 'neutral')">Neytral</button>
+        </div>
+
+        <!-- Feedback Table -->
+        <div class="table-card">
+            <h3>So'nggi feedbacklar</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sana</th>
+                        <th>Kurs</th>
+                        <th>Sentiment</th>
+                        <th>Feedback</th>
+                        <th>Xulosa</th>
+                        <th>Turi</th>
+                    </tr>
+                </thead>
+                <tbody id="feedbackBody">
+                    {% for fb in recent %}
+                    <tr>
+                        <td>{{ fb.created_at[:16] }}</td>
+                        <td>{{ fb.course or '—' }}</td>
+                        <td><span class="badge {{ fb.sentiment }}">{{ fb.sentiment }}</span></td>
+                        <td>{{ fb.text[:120] }}{{ '...' if fb.text|length > 120 else '' }}</td>
+                        <td>{{ fb.ai_summary or '—' }}</td>
+                        <td><span class="badge {{ fb.source_type }}">{{ fb.source_type }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const dailyData = {{ daily | safe }};
+        const stats = {{ stats | tojson | safe }};
+        const courseStats = {{ course_stats | tojson | safe }};
+
+        // ── Sentiment Donut ─────────────────────
+        new Chart(document.getElementById('sentimentChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Ijobiy', 'Salbiy', 'Neytral'],
+                datasets: [{
+                    data: [stats.positive, stats.negative, stats.neutral],
+                    backgroundColor: ['#28a745', '#dc3545', '#ffc107'],
+                    borderWidth: 0,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+
+        // ── Daily Line Chart ────────────────────
+        new Chart(document.getElementById('dailyChart'), {
+            type: 'line',
+            data: {
+                labels: dailyData.map(d => d.day.slice(5)),
+                datasets: [
+                    {
+                        label: 'Ijobiy',
+                        data: dailyData.map(d => d.positive),
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40,167,69,0.1)',
+                        fill: true, tension: 0.4,
+                    },
+                    {
+                        label: 'Salbiy',
+                        data: dailyData.map(d => d.negative),
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220,53,69,0.1)',
+                        fill: true, tension: 0.4,
+                    },
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+
+        // ── Course Bar Chart ────────────────────
+        new Chart(document.getElementById('courseChart'), {
+            type: 'bar',
+            data: {
+                labels: courseStats.map(c => c.course),
+                datasets: [
+                    {
+                        label: 'Ijobiy',
+                        data: courseStats.map(c => c.positive),
+                        backgroundColor: '#28a745',
+                    },
+                    {
+                        label: 'Salbiy',
+                        data: courseStats.map(c => c.negative),
+                        backgroundColor: '#dc3545',
+                    },
+                    {
+                        label: 'Neytral',
+                        data: courseStats.map(c => c.neutral),
+                        backgroundColor: '#ffc107',
+                    },
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+            }
+        });
+
+        // ── Type Pie ────────────────────────────
+        new Chart(document.getElementById('typeChart'), {
+            type: 'pie',
+            data: {
+                labels: ['Ovozli', 'Matnli'],
+                datasets: [{
+                    data: [stats.voice_count, stats.text_count],
+                    backgroundColor: ['#17a2b8', '#6c757d'],
+                    borderWidth: 0,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+
+        // ── Filters ─────────────────────────────
+        let currentSentiment = '';
+
+        function filterSentiment(btn, sentiment) {
+            currentSentiment = sentiment;
+            document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filterFeedbacks();
+        }
+
+        async function filterFeedbacks() {
+            const course = document.getElementById('filterCourse').value;
+            const params = new URLSearchParams();
+            if (course) params.set('course', course);
+            if (currentSentiment) params.set('sentiment', currentSentiment);
+
+            const resp = await fetch('/api/feedbacks?' + params);
+            const data = await resp.json();
+
+            const tbody = document.getElementById('feedbackBody');
+            tbody.innerHTML = data.map(fb => `
+                <tr>
+                    <td>${(fb.created_at || '').slice(0, 16)}</td>
+                    <td>${fb.course || '—'}</td>
+                    <td><span class="badge ${fb.sentiment}">${fb.sentiment}</span></td>
+                    <td>${(fb.text || '').slice(0, 120)}${fb.text && fb.text.length > 120 ? '...' : ''}</td>
+                    <td>${fb.ai_summary || '—'}</td>
+                    <td><span class="badge ${fb.source_type}">${fb.source_type}</span></td>
+                </tr>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
