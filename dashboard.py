@@ -25,7 +25,7 @@ COURSES = [c.strip() for c in os.getenv("COURSES", "Umumiy").split(",")]
 def index():
     stats = db.get_stats()
     course_stats = db.get_course_stats()
-    daily = db.get_daily_counts(days=30)
+    daily = db.get_daily_stats(days=30)
     recent = db.get_recent_feedbacks(limit=30)
 
     return render_template(
@@ -67,7 +67,7 @@ def api_feedbacks():
 @app.route("/api/daily")
 def api_daily():
     days = request.args.get("days", 30, type=int)
-    daily = db.get_daily_counts(days=days)
+    daily = db.get_daily_stats(days=days)
     return jsonify(daily)
 
 

@@ -284,6 +284,27 @@ class Database:
             """, (since,))
             return [dict(r) for r in cur.fetchall()]
 
+    def get_recent_feedbacks(self, limit: int = 30, course: str = None,
+                             sentiment: str = None) -> list:
+        with self._conn() as conn:
+            cur = conn.cursor()
+            query = """
+                SELECT f.*, u.first_name, u.username
+                FROM feedbacks f JOIN users u ON f.user_id = u.user_id
+                WHERE f.is_toxic = FALSE
+            """
+            params = []
+            if course:
+                query += " AND f.course = %s"
+                params.append(course)
+            if sentiment:
+                query += " AND f.sentiment = %s"
+                params.append(sentiment)
+            query += " ORDER BY f.created_at DESC LIMIT %s"
+            params.append(limit)
+            cur.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
     # ══════════════════════════════════════════════════════════════
     #  FOLLOW-UP
     # ══════════════════════════════════════════════════════════════
