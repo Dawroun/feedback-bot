@@ -1,22 +1,14 @@
 """
-O'quv Markazi Feedback Bot
-===========================
-Ota-onalardan ovozli/matnli feedback yig'ish,
-AI tahlil, moderatsiya, admin hisobot.
+O'quv Markazi Feedback Bot (v3 — ko'p tilli)
 """
 
-import os
-import logging
-import asyncio
-from datetime import datetime, time
+import os, logging, asyncio
+from datetime import datetime
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.filters import CommandStart, Command
-from aiogram.types import (
-    FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
-    CallbackQuery,
-)
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -27,17 +19,13 @@ from speech_to_text import transcribe_voice
 from analyzer import analyze_feedback, generate_daily_report
 from database import Database
 from moderation import ModerationSystem
+from translations import t, STT_LANGUAGES
 
 load_dotenv()
 
-# ── Logging ──────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# ── Config ───────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -49,46 +37,42 @@ REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", "20"))
 REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", "0"))
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN sozlamasi kerak! .env faylni tekshiring.")
+    raise ValueError("BOT_TOKEN kerak!")
 
-# ── Bot & DB ─────────────────────────────────────────────────────────
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
-
 db = Database("feedbacks.db")
 moderator = ModerationSystem(db, max_daily=MAX_DAILY, max_warnings=MAX_WARNINGS)
-
 VOICE_DIR = Path("voices")
 VOICE_DIR.mkdir(exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  FSM STATES (feedback jarayoni)
-# ══════════════════════════════════════════════════════════════════════
-
 class FeedbackFlow(StatesGroup):
+    choosing_language = State()
     choosing_anonymous = State()
     choosing_course = State()
     waiting_feedback = State()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  KEYBOARD BUILDERS
-# ══════════════════════════════════════════════════════════════════════
+# ── Keyboards ────────────────────────────────────────────────────────
 
-def anonymous_keyboard() -> InlineKeyboardMarkup:
+def language_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Ismim ko'rinsin", callback_data="anon_no"),
-            InlineKeyboardButton(text="🕶 Anonim", callback_data="anon_yes"),
-        ]
+        [InlineKeyboardButton(text="O'zbekcha", callback_data="lang_uz_lat")],
+        [InlineKeyboardButton(text="\u040e\u0437\u0431\u0435\u043a\u0447\u0430", callback_data="lang_uz_cyr")],
+        [InlineKeyboardButton(text="\u0420\u0443\u0441\u0441\u043a\u0438\u0439 \u044f\u0437\u044b\u043a", callback_data="lang_ru")],
     ])
 
+def anonymous_keyboard(lang):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=t("btn_show_name", lang), callback_data="anon_no"),
+        InlineKeyboardButton(text=t("btn_anonymous", lang), callback_data="anon_yes"),
+    ]])
 
-def course_keyboard() -> InlineKeyboardMarkup:
+def course_keyboard(lang):
     buttons = []
     row = []
     for i, course in enumerate(COURSES):
@@ -98,163 +82,129 @@ def course_keyboard() -> InlineKeyboardMarkup:
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="📋 Umumiy fikr", callback_data="course_general")])
+    buttons.append([InlineKeyboardButton(text=t("btn_general", lang), callback_data="course_general")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
-def admin_keyboard() -> InlineKeyboardMarkup:
+def again_keyboard(lang):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"),
-            InlineKeyboardButton(text="📋 Hisobot", callback_data="admin_report"),
-        ],
-        [
-            InlineKeyboardButton(text="📥 Export CSV", callback_data="admin_export"),
-            InlineKeyboardButton(text="🌐 Dashboard", callback_data="admin_dashboard"),
-        ],
+        [InlineKeyboardButton(text=t("btn_again", lang), callback_data="again")]
+    ])
+
+def satisfaction_keyboard(fid, lang):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=t("btn_satisfied", lang), callback_data=f"satisfied_{fid}"),
+        InlineKeyboardButton(text=t("btn_unsatisfied", lang), callback_data=f"unsatisfied_{fid}"),
+    ]])
+
+def admin_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="\U0001f4ca Statistika", callback_data="admin_stats"),
+         InlineKeyboardButton(text="\U0001f4cb Hisobot", callback_data="admin_report")],
+        [InlineKeyboardButton(text="\U0001f4e5 Export CSV", callback_data="admin_export"),
+         InlineKeyboardButton(text="\U0001f310 Dashboard", callback_data="admin_dashboard")],
     ])
 
 
-def again_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Yana feedback yozish", callback_data="again")]
-    ])
-
-
-def satisfaction_keyboard(fid: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Ha, mamnunman", callback_data=f"satisfied_{fid}"),
-         InlineKeyboardButton(text="❌ Yo'q", callback_data=f"unsatisfied_{fid}")]
-    ])
-
-
-def get_sentiment_response(sentiment: str, course: str) -> str:
-    if sentiment == "positive":
-        return ("✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Ishonchingiz uchun katta rahmat! 🙏\n" "Farzandingiz biz bilan ajoyib natijalarga erishadi!\n\n" f"💪 {CENTER_NAME} jamoasi har doim eng yaxshisini beradi!")
-    elif sentiment == "negative":
-        return ("📝 <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Bu holatdan juda afsusdamiz 😔\n" "Siz aytgan fikrlarni albatta inobatga olamiz.\n" "Tez fursatda muammoni hal qilib sizga qayta aloqaga chiqamiz.\n\n" "Sabr-toqatingiz uchun rahmat! 🙏")
-    else:
-        return ("✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Fikringiz uchun minnatdormiz! 🙏\n" "Farzandingizning porloq kelajagi uchun birgalikda harakat qilamiz.\n\n" f"💫 {CENTER_NAME} — bilim va muvaffaqiyat maskani!")
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  /start — ASOSIY BOSHLASH
-# ══════════════════════════════════════════════════════════════════════
+# ── /start ───────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
-    user = message.from_user
-    db.upsert_user(user.id, user.username, user.first_name, user.last_name)
-
-    # Ban tekshiruvi
-    if db.is_banned(user.id):
-        await message.answer(
-            "⛔ Siz noto'g'ri xatti-harakat tufayli bloklangansiz.\n"
-            "Agar bu xato deb hisoblasangiz, admin bilan bog'laning."
-        )
+    db.upsert_user(message.from_user.id, message.from_user.username,
+                   message.from_user.first_name, message.from_user.last_name)
+    await state.clear()
+    if db.is_banned(message.from_user.id):
+        await message.answer(t("banned", "uz_lat"))
         return
-
-    welcome = (
-        f"Assalomu alaykum, {user.first_name}! 👋\n\n"
-        f"<b>{CENTER_NAME}</b> feedback botiga xush kelibsiz!\n\n"
-        "Siz bu yerda o'quv markazi haqida fikr-mulohazangizni "
-        "qoldirishingiz mumkin.\n\n"
-        "📌 Ism ko'rinsinmi yoki anonim bo'lasizmi?"
+    await message.answer(
+        "\U0001f310 Tilni tanlang / \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u044f\u0437\u044b\u043a / \u0422\u0438\u043b\u043d\u0438 \u0442\u0430\u043d\u043b\u0430\u043d\u0433",
+        reply_markup=language_keyboard(),
     )
-    await message.answer(welcome, parse_mode=ParseMode.HTML,
-                         reply_markup=anonymous_keyboard())
+    await state.set_state(FeedbackFlow.choosing_language)
+
+
+@router.callback_query(F.data.startswith("lang_"))
+async def on_language_choice(callback: CallbackQuery, state: FSMContext):
+    lang = callback.data.replace("lang_", "")
+    await state.update_data(lang=lang)
+    user = callback.from_user
+    if db.is_banned(user.id):
+        await callback.message.edit_text(t("banned", lang))
+        return
+    await callback.message.edit_text(
+        t("welcome", lang, name=user.first_name, center=CENTER_NAME),
+        parse_mode=ParseMode.HTML,
+        reply_markup=anonymous_keyboard(lang),
+    )
     await state.set_state(FeedbackFlow.choosing_anonymous)
+    await callback.answer()
 
-
-# ══════════════════════════════════════════════════════════════════════
-#  QADAM 1: Anonim yoki ismli
-# ══════════════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("anon_"))
 async def on_anonymous_choice(callback: CallbackQuery, state: FSMContext):
     is_anon = callback.data == "anon_yes"
+    data = await state.get_data()
+    lang = data.get("lang", "uz_lat")
     await state.update_data(is_anonymous=is_anon)
-
-    label = "🕶 Anonim" if is_anon else f"👤 {callback.from_user.first_name}"
+    label = t("btn_anonymous", lang) if is_anon else f"\U0001f464 {callback.from_user.first_name}"
     await callback.message.edit_text(
-        f"Tanlandi: <b>{label}</b>\n\n"
-        "📚 Endi qaysi kurs haqida fikr bildirasiz?",
+        t("anon_chosen", lang, label=label),
         parse_mode=ParseMode.HTML,
-        reply_markup=course_keyboard(),
+        reply_markup=course_keyboard(lang),
     )
     await state.set_state(FeedbackFlow.choosing_course)
     await callback.answer()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  QADAM 2: Kurs tanlash
-# ══════════════════════════════════════════════════════════════════════
-
 @router.callback_query(F.data.startswith("course_"))
 async def on_course_choice(callback: CallbackQuery, state: FSMContext):
-    data = callback.data
-    if data == "course_general":
+    data = await state.get_data()
+    lang = data.get("lang", "uz_lat")
+    cdata = callback.data
+    if cdata == "course_general":
         course = "Umumiy"
     else:
-        idx = int(data.split("_")[1])
+        idx = int(cdata.split("_")[1])
         course = COURSES[idx] if idx < len(COURSES) else "Umumiy"
-
     await state.update_data(course=course)
-
     remaining = moderator.get_remaining_today(callback.from_user.id)
-
     await callback.message.edit_text(
-        f"📚 Kurs: <b>{course}</b>\n\n"
-        "Endi fikringizni yuboring:\n"
-        "🎤 <b>Ovozli habar</b> yoki ✏️ <b>Matn</b> yozing.\n\n"
-        f"💡 Bugun yana {remaining} ta feedback yuborishingiz mumkin.",
+        t("course_chosen", lang, course=course, remaining=remaining),
         parse_mode=ParseMode.HTML,
     )
     await state.set_state(FeedbackFlow.waiting_feedback)
     await callback.answer()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  QADAM 3: OVOZLI FEEDBACK
-# ══════════════════════════════════════════════════════════════════════
+# ── Voice feedback ───────────────────────────────────────────────────
 
 @router.message(FeedbackFlow.waiting_feedback, F.voice)
 async def handle_voice(message: types.Message, state: FSMContext):
     user = message.from_user
-    fsm_data = await state.get_data()
-    is_anonymous = fsm_data.get("is_anonymous", False)
-    course = fsm_data.get("course", "Umumiy")
+    fsm = await state.get_data()
+    lang = fsm.get("lang", "uz_lat")
+    is_anon = fsm.get("is_anonymous", False)
+    course = fsm.get("course", "Umumiy")
 
-    processing_msg = await message.answer("🎤 Ovozli habar qabul qilindi. Tahlil qilinmoqda...")
-
+    msg = await message.answer(t("voice_received", lang))
     ogg_path = VOICE_DIR / f"{user.id}_{message.message_id}.ogg"
 
     try:
-        # 1. Faylni yuklash
         file = await bot.get_file(message.voice.file_id)
         await bot.download_file(file.file_path, ogg_path)
-
-        # 2. STT
-        text = await transcribe_voice(str(ogg_path))
+        stt_lang = STT_LANGUAGES.get(lang, "uz-UZ")
+        text = await transcribe_voice(str(ogg_path), language=stt_lang)
         if not text:
-            await processing_msg.edit_text(
-                "⚠️ Ovozli habar tushunarsiz chiqdi.\n"
-                "Iltimos, aniqroq gapiring yoki matn yozing."
-            )
+            await msg.edit_text(t("voice_unclear", lang))
             return
 
-        # 3. Moderatsiya
-        mod_result = await moderator.process_moderation(user.id, text, GROQ_API_KEY)
-        if not mod_result['allowed']:
-            await _handle_moderation_block(processing_msg, mod_result, state)
+        mod = await moderator.process_moderation(user.id, text, GROQ_API_KEY)
+        if not mod['allowed']:
+            await _handle_mod_block(msg, mod, state, lang)
             return
 
-        # 4. AI tahlil
         analysis = await analyze_feedback(text, GROQ_API_KEY)
-
-        # 5. Bazaga saqlash
         fb_id = db.save_feedback(
-            user_id=user.id, text=text, is_anonymous=is_anonymous,
+            user_id=user.id, text=text, is_anonymous=is_anon,
             course=course, sentiment=analysis['sentiment'],
             ai_summary=analysis.get('summary', ''),
             topics=analysis.get('topics', ''),
@@ -262,59 +212,51 @@ async def handle_voice(message: types.Message, state: FSMContext):
             source_type="voice",
         )
 
-        await processing_msg.edit_text(
-            get_sentiment_response(analysis['sentiment'], course),
+        resp_key = f"response_{analysis['sentiment']}"
+        await msg.edit_text(
+            t(resp_key, lang, course=course, center=CENTER_NAME),
             parse_mode=ParseMode.HTML,
-            reply_markup=again_keyboard(),
+            reply_markup=again_keyboard(lang),
         )
 
-        # 6. Admin ogohlantirish
         if analysis.get('sentiment') == 'negative' or analysis.get('urgency') == 'high':
             db.create_followup(fb_id, user.id)
-            await _notify_admins(user, text, analysis, course, is_anonymous, fb_id)
-
+            db.save_followup_lang(fb_id, lang)
+            await _notify_admins(user, text, analysis, course, is_anon, fb_id)
     except Exception as e:
         logger.error(f"Voice error: {e}")
-        await processing_msg.edit_text(
-            "⚠️ Xatolik yuz berdi. Iltimos, matn shaklida yozing."
-        )
+        await msg.edit_text(t("voice_error", lang))
     finally:
         if ogg_path.exists():
             ogg_path.unlink(missing_ok=True)
         await state.clear()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  QADAM 3: MATNLI FEEDBACK
-# ══════════════════════════════════════════════════════════════════════
+# ── Text feedback ────────────────────────────────────────────────────
 
 @router.message(FeedbackFlow.waiting_feedback, F.text)
-async def handle_text_feedback(message: types.Message, state: FSMContext):
+async def handle_text(message: types.Message, state: FSMContext):
     user = message.from_user
     text = message.text.strip()
-    fsm_data = await state.get_data()
-    is_anonymous = fsm_data.get("is_anonymous", False)
-    course = fsm_data.get("course", "Umumiy")
+    fsm = await state.get_data()
+    lang = fsm.get("lang", "uz_lat")
+    is_anon = fsm.get("is_anonymous", False)
+    course = fsm.get("course", "Umumiy")
 
     if len(text) < 5:
-        await message.answer("✏️ Iltimos, batafsil yozing (kamida 5 belgi).")
+        await message.answer(t("text_too_short", lang))
         return
 
-    processing_msg = await message.answer("📝 Fikringiz qabul qilindi. Tahlil qilinmoqda...")
-
+    msg = await message.answer(t("text_received", lang))
     try:
-        # 1. Moderatsiya
-        mod_result = await moderator.process_moderation(user.id, text, GROQ_API_KEY)
-        if not mod_result['allowed']:
-            await _handle_moderation_block(processing_msg, mod_result, state)
+        mod = await moderator.process_moderation(user.id, text, GROQ_API_KEY)
+        if not mod['allowed']:
+            await _handle_mod_block(msg, mod, state, lang)
             return
 
-        # 2. AI tahlil
         analysis = await analyze_feedback(text, GROQ_API_KEY)
-
-        # 3. Bazaga saqlash
         fb_id = db.save_feedback(
-            user_id=user.id, text=text, is_anonymous=is_anonymous,
+            user_id=user.id, text=text, is_anonymous=is_anon,
             course=course, sentiment=analysis['sentiment'],
             ai_summary=analysis.get('summary', ''),
             topics=analysis.get('topics', ''),
@@ -322,500 +264,273 @@ async def handle_text_feedback(message: types.Message, state: FSMContext):
             source_type="text",
         )
 
-        await processing_msg.edit_text(
-            get_sentiment_response(analysis['sentiment'], course),
+        resp_key = f"response_{analysis['sentiment']}"
+        await msg.edit_text(
+            t(resp_key, lang, course=course, center=CENTER_NAME),
             parse_mode=ParseMode.HTML,
-            reply_markup=again_keyboard(),
+            reply_markup=again_keyboard(lang),
         )
 
         if analysis.get('sentiment') == 'negative' or analysis.get('urgency') == 'high':
             db.create_followup(fb_id, user.id)
-            await _notify_admins(user, text, analysis, course, is_anonymous, fb_id)
-
+            db.save_followup_lang(fb_id, lang)
+            await _notify_admins(user, text, analysis, course, is_anon, fb_id)
     except Exception as e:
         logger.error(f"Text error: {e}")
-        await processing_msg.edit_text("⚠️ Xatolik yuz berdi. Keyinroq qayta urinib ko'ring.")
+        await msg.edit_text(t("text_error", lang))
     finally:
         await state.clear()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  MODERATSIYA BLOKLASH XABARLARI
-# ══════════════════════════════════════════════════════════════════════
+# ── Moderation block ─────────────────────────────────────────────────
 
-async def _handle_moderation_block(msg: types.Message, mod_result: dict,
-                                    state: FSMContext):
-    reason = mod_result['reason']
-
+async def _handle_mod_block(msg, mod, state, lang):
+    reason = mod['reason']
     if reason == "banned":
-        await msg.edit_text(
-            "⛔ Siz noto'g'ri xatti-harakat tufayli bloklangansiz.\n"
-            "Admin bilan bog'laning."
-        )
+        await msg.edit_text(t("banned", lang))
     elif reason == "rate_limit":
-        await msg.edit_text(
-            f"⏳ Bugungi limit tugadi (kuniga {MAX_DAILY} ta).\n"
-            "Ertaga qayta urinib ko'ring."
-        )
+        await msg.edit_text(t("rate_limit", lang, max=MAX_DAILY))
     elif reason == "toxic":
-        wc = mod_result['warning_count']
-        remaining = MAX_WARNINGS - wc
-
-        if mod_result['is_banned']:
-            await msg.edit_text(
-                f"⛔ Siz {MAX_WARNINGS} marta ogohlantirildingiz.\n"
-                "Hisobingiz bloklandi. Admin bilan bog'laning."
-            )
+        wc = mod['warning_count']
+        rem = MAX_WARNINGS - wc
+        if mod['is_banned']:
+            await msg.edit_text(t("toxic_banned", lang, max=MAX_WARNINGS))
         else:
-            await msg.edit_text(
-                "⚠️ <b>Ogohlantirish!</b>\n\n"
-                "Xabaringizda noto'g'ri so'zlar aniqlandi.\n"
-                "Iltimos, hurmatli munosabatda bo'ling.\n\n"
-                f"🔴 Ogohlantirish: {wc}/{MAX_WARNINGS}\n"
-                f"Yana {remaining} marta ogohlantirish — blok.",
-                parse_mode=ParseMode.HTML,
-            )
-
+            await msg.edit_text(t("toxic_warning", lang, wc=wc, max=MAX_WARNINGS, remaining=rem), parse_mode=ParseMode.HTML)
     await state.clear()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  ADMINLARGA XABAR YUBORISH
-# ══════════════════════════════════════════════════════════════════════
+# ── Admin notification ───────────────────────────────────────────────
 
-async def _notify_admins(user, text, analysis, course, is_anonymous, fb_id):
-    sender = "Anonim" if is_anonymous else f"{user.first_name} (@{user.username or '?'})"
-    emoji = "🚨" if analysis.get('urgency') == 'high' else "⚠️"
-
+async def _notify_admins(user, text, analysis, course, is_anon, fb_id):
+    sender = "Anonim" if is_anon else f"{user.first_name} (@{user.username or '?'})"
+    emoji = "\U0001f6a8" if analysis.get('urgency') == 'high' else "\u26a0\ufe0f"
     alert = (
         f"{emoji} <b>YANGI SALBIY FEEDBACK #{fb_id}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 Kimdan: {sender}\n"
-        f"📚 Kurs: {course}\n"
-        f"📝 Matn: {text[:300]}\n"
-        f"🤖 Xulosa: {analysis.get('summary', '-')}\n"
-        f"🏷 Mavzular: {analysis.get('topics', '-')}\n"
-        f"🔥 Muhimlik: {analysis.get('urgency', 'low')}\n"
-        f"📅 Vaqt: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        f"\U0001f464 Kimdan: {sender}\n"
+        f"\U0001f4da Kurs: {course}\n"
+        f"\U0001f4dd Matn: {text[:300]}\n"
+        f"\U0001f916 Xulosa: {analysis.get('summary', '-')}\n"
+        f"\U0001f525 Muhimlik: {analysis.get('urgency', 'low')}\n"
+        f"\U0001f4c5 Vaqt: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"\U0001f4de <b>BU OTA-ONAGA QAYTA ALOQAGA CHIQISH SHART!</b>\n"
+        f"<code>/reply {fb_id} Javob matni</code>\n"
     )
-
-    alert += ("\n━━━━━━━━━━━━━━━━━━━━━\n" "📞 <b>BU OTA-ONAGA QAYTA ALOQAGA CHIQISH SHART!</b>\n" f"Hal qilganingizdan keyin: <code>/reply {fb_id} Javob</code>\n")
-    if is_anonymous:
-        alert += f"\n🔍 Kimligini bilish: /unmask {fb_id}"
-
+    if is_anon:
+        alert += f"\n\U0001f50d Kimligini bilish: /unmask {fb_id}"
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, alert, parse_mode=ParseMode.HTML)
         except Exception as e:
-            logger.error(f"Admin {admin_id} ga xabar yuborilmadi: {e}")
+            logger.error(f"Admin {admin_id}: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  ADMIN BUYRUQLARI
-# ══════════════════════════════════════════════════════════════════════
+# ── Admin commands ───────────────────────────────────────────────────
 
 @router.message(Command("admin"))
 async def cmd_admin(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
         return
-    await message.answer(
-        "🔧 <b>Admin panel</b>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=admin_keyboard(),
-    )
-
+    await message.answer("\U0001f527 <b>Admin panel</b>", parse_mode=ParseMode.HTML, reply_markup=admin_keyboard())
 
 @router.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
         return
-
     stats = db.get_stats()
-    course_stats = db.get_course_stats()
-
-    text = (
-        "📊 <b>Umumiy Statistika</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📝 Jami: <b>{stats['total']}</b>\n"
-        f"✅ Ijobiy: <b>{stats['positive']}</b>\n"
-        f"⚠️ Salbiy: <b>{stats['negative']}</b>\n"
-        f"➖ Neytral: <b>{stats['neutral']}</b>\n"
-        f"🎤 Ovozli: <b>{stats['voice_count']}</b>\n"
-        f"✏️ Matnli: <b>{stats['text_count']}</b>\n"
-    )
-
-    if stats['total'] > 0:
-        pos_pct = stats['positive'] / stats['total'] * 100
-        neg_pct = stats['negative'] / stats['total'] * 100
-        text += f"\n📈 Ijobiy: {pos_pct:.0f}% | 📉 Salbiy: {neg_pct:.0f}%\n"
-
-    if course_stats:
-        text += "\n📚 <b>Kurslar bo'yicha:</b>\n"
-        for cs in course_stats:
-            text += f"  • {cs['course']}: {cs['total']} ta (✅{cs['positive']} ⚠️{cs['negative']})\n"
-
-    await message.answer(text, parse_mode=ParseMode.HTML)
-
+    cs = db.get_course_stats()
+    txt = (f"\U0001f4ca <b>Statistika</b>\nJami: <b>{stats['total']}</b>\n"
+           f"\u2705 Ijobiy: <b>{stats['positive']}</b>\n\u26a0\ufe0f Salbiy: <b>{stats['negative']}</b>\n"
+           f"\u2796 Neytral: <b>{stats['neutral']}</b>\n\U0001f3a4 Ovozli: <b>{stats['voice_count']}</b>\n\u270f\ufe0f Matnli: <b>{stats['text_count']}</b>\n")
+    if cs:
+        txt += "\n\U0001f4da <b>Kurslar:</b>\n"
+        for c in cs:
+            txt += f"  \u2022 {c['course']}: {c['total']} (\u2705{c['positive']} \u26a0\ufe0f{c['negative']})\n"
+    await message.answer(txt, parse_mode=ParseMode.HTML)
 
 @router.message(Command("unmask"))
 async def cmd_unmask(message: types.Message):
-    """Anonim feedbackning haqiqiy egasini ko'rsatish"""
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
         return
-
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("Foydalanish: /unmask <feedback_id>\nMasalan: /unmask 45")
+        await message.answer("Foydalanish: /unmask <id>")
         return
-
-    try:
-        fb_id = int(parts[1])
-    except ValueError:
-        await message.answer("⚠️ Noto'g'ri ID. Raqam kiriting.")
-        return
-
-    fb = db.get_feedback_by_id(fb_id)
+    fb = db.get_feedback_by_id(int(parts[1]))
     if not fb:
-        await message.answer(f"❌ #{fb_id} raqamli feedback topilmadi.")
+        await message.answer("\u274c Topilmadi.")
         return
-
-    user_info = db.get_user_info(fb['user_id'])
-    warnings = db.get_warning_count(fb['user_id'])
-
-    uname = user_info.get('username') or "yo'q"
-    banned_text = "Ha" if user_info.get('is_banned') else "Yo'q"
-
-    text = (
-        f"🔍 <b>Feedback #{fb_id} — Foydalanuvchi ma'lumotlari</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 Telegram ID: <code>{fb['user_id']}</code>\n"
-        f"👤 Ism: {user_info.get('first_name', '?')} {user_info.get('last_name') or ''}\n"
-        f"📱 Username: @{uname}\n"
-        f"⚠️ Ogohlantirishlar: {warnings}\n"
-        f"🚫 Bloklangan: {banned_text}\n"
-        f"\n📝 Feedback: {fb['text'][:500]}\n"
-        f"📅 Sana: {fb['created_at']}\n"
+    ui = db.get_user_info(fb['user_id'])
+    uname = ui.get('username') or "yo'q"
+    banned = "Ha" if ui.get('is_banned') else "Yo'q"
+    await message.answer(
+        f"\U0001f50d <b>#{parts[1]}</b>\nID: <code>{fb['user_id']}</code>\n"
+        f"Ism: {ui.get('first_name','?')}\nUsername: @{uname}\nBan: {banned}\n\n{fb['text'][:500]}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f6ab 1kun ban", callback_data=f"ban_{fb['user_id']}_1"),
+             InlineKeyboardButton(text="\U0001f6ab Doimiy", callback_data=f"ban_{fb['user_id']}_0")],
+            [InlineKeyboardButton(text="\u2705 Unban", callback_data=f"unban_{fb['user_id']}")]
+        ]),
     )
-
-    # Ban tugmalari
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🚫 1 kunga ban",
-                callback_data=f"ban_{fb['user_id']}_1"
-            ),
-            InlineKeyboardButton(
-                text="🚫 Doimiy ban",
-                callback_data=f"ban_{fb['user_id']}_0"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text="✅ Unban",
-                callback_data=f"unban_{fb['user_id']}"
-            ),
-        ]
-    ])
-
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
-
 
 @router.callback_query(F.data.startswith("ban_"))
-async def on_ban(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Faqat adminlar uchun.", show_alert=True)
-        return
-
-    parts = callback.data.split("_")
-    user_id = int(parts[1])
-    days = int(parts[2])
-
-    if days == 0:
-        db.ban_user(user_id, "Admin tomonidan doimiy ban")
-        await callback.message.edit_text(
-            callback.message.text + f"\n\n✅ Foydalanuvchi {user_id} doimiy bloklandi.",
-            parse_mode=ParseMode.HTML,
-        )
-    else:
-        db.ban_user(user_id, f"Admin tomonidan {days} kunga ban", days=days)
-        await callback.message.edit_text(
-            callback.message.text + f"\n\n✅ Foydalanuvchi {user_id} {days} kunga bloklandi.",
-            parse_mode=ParseMode.HTML,
-        )
-    await callback.answer("Bloklandi!")
-
+async def on_ban(cb: CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS: return
+    p = cb.data.split("_"); uid = int(p[1]); d = int(p[2])
+    db.ban_user(uid, "Admin ban", days=d if d > 0 else None)
+    await cb.answer(f"Bloklandi! {'Doimiy' if d==0 else f'{d} kunga'}")
 
 @router.callback_query(F.data.startswith("unban_"))
-async def on_unban(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Faqat adminlar uchun.", show_alert=True)
-        return
-
-    user_id = int(callback.data.split("_")[1])
-    db.unban_user(user_id)
-    await callback.message.edit_text(
-        callback.message.text + f"\n\n✅ Foydalanuvchi {user_id} blokdan chiqarildi.",
-        parse_mode=ParseMode.HTML,
-    )
-    await callback.answer("Blokdan chiqarildi!")
-
+async def on_unban(cb: CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS: return
+    db.unban_user(int(cb.data.split("_")[1]))
+    await cb.answer("Blokdan chiqarildi!")
 
 @router.message(Command("resetwarnings"))
-async def cmd_reset_warnings(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
-        return
+async def cmd_reset(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS: return
     parts = message.text.split()
-    if len(parts) < 2:
-        await message.answer("Foydalanish: /resetwarnings <user_id>")
-        return
-    try:
-        user_id = int(parts[1])
-    except ValueError:
-        await message.answer("⚠️ Noto\'g\'ri ID.")
-        return
-    db.reset_warnings(user_id)
-    await message.answer(f"✅ Foydalanuvchi {user_id} ogohlantirishlari tozalandi.")
-
-
+    if len(parts) < 2: await message.answer("/resetwarnings <user_id>"); return
+    db.reset_warnings(int(parts[1]))
+    await message.answer(f"\u2705 Tozalandi.")
 
 @router.message(Command("reply"))
 async def cmd_reply(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
-        return
+    if message.from_user.id not in ADMIN_IDS: return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("Foydalanish: /reply <feedback_id> <javob>\nMasalan: /reply 5 Muammoni hal qildik")
+        await message.answer("/reply <id> <javob>")
         return
-    try:
-        fb_id = int(parts[1])
-    except ValueError:
-        await message.answer("⚠️ Noto'g'ri ID.")
-        return
+    fb_id = int(parts[1])
     reply_text = parts[2].strip()
     fb = db.get_feedback_by_id(fb_id)
-    if not fb:
-        await message.answer(f"❌ #{fb_id} topilmadi.")
-        return
-    followup = db.get_followup_by_feedback(fb_id)
-    if not followup:
-        await message.answer(f"❌ #{fb_id} uchun follow-up yo'q.")
-        return
+    if not fb: await message.answer("\u274c Topilmadi."); return
+    fu = db.get_followup_by_feedback(fb_id)
+    if not fu: await message.answer("\u274c Follow-up yo'q."); return
     db.set_followup_reply(fb_id, reply_text)
+    parent_lang = db.get_followup_lang(fb_id) or "uz_lat"
     try:
         await bot.send_message(
-            followup['parent_user_id'],
-            f"📬 <b>Hurmatli ota-ona!</b>\n\nSiz yozgan fikr-mulohaza inobatga olindi:\n\n💬 <i>{reply_text}</i>\n\nEndi bu masaladan mamnunmisiz?",
+            fu['parent_user_id'],
+            t("followup_message", parent_lang, reply=reply_text),
             parse_mode=ParseMode.HTML,
-            reply_markup=satisfaction_keyboard(followup['id']),
+            reply_markup=satisfaction_keyboard(fu['id'], parent_lang),
         )
-        await message.answer(f"✅ Javob #{fb_id} feedback egasiga yuborildi!")
+        await message.answer(f"\u2705 #{fb_id} egasiga yuborildi!")
     except Exception as e:
-        await message.answer(f"⚠️ Xabar yuborilmadi: {e}")
-
+        await message.answer(f"\u26a0\ufe0f {e}")
 
 @router.message(Command("report"))
 async def cmd_report(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
-        return
-
-    await message.answer("📊 Hisobot tayyorlanmoqda...")
-    feedbacks = db.get_feedbacks_since(hours=24)
-    report = await generate_daily_report(feedbacks, GROQ_API_KEY)
-    await message.answer(f"📋 <b>Kunlik Hisobot</b>\n\n{report}", parse_mode=ParseMode.HTML)
-
+    if message.from_user.id not in ADMIN_IDS: return
+    await message.answer("\U0001f4ca Tayyorlanmoqda...")
+    fbs = db.get_feedbacks_since(hours=24)
+    r = await generate_daily_report(fbs, GROQ_API_KEY)
+    await message.answer(f"\U0001f4cb <b>Hisobot</b>\n\n{r}", parse_mode=ParseMode.HTML)
 
 @router.message(Command("export"))
 async def cmd_export(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ Faqat adminlar uchun.")
-        return
-
-    filepath = db.export_csv("export_feedbacks.csv")
-    if filepath and os.path.exists(filepath):
-        doc = FSInputFile(filepath, filename="feedbacks_report.csv")
-        await message.answer_document(doc, caption="📎 Barcha feedbacklar CSV formatida")
+    if message.from_user.id not in ADMIN_IDS: return
+    fp = db.export_csv("export.csv")
+    if fp and os.path.exists(fp):
+        await message.answer_document(FSInputFile(fp, filename="feedbacks.csv"))
     else:
-        await message.answer("📭 Export qilish uchun ma'lumot yo'q.")
+        await message.answer("Ma'lumot yo'q.")
 
-
-# Admin callback handlers
 @router.callback_query(F.data == "admin_stats")
-async def admin_stats_cb(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔", show_alert=True)
-        return
-    # Trigger /stats
-    fake_msg = callback.message
-    fake_msg.from_user = callback.from_user
-    await cmd_stats(fake_msg)
-    await callback.answer()
-
-
+async def a_stats(cb: CallbackQuery):
+    cb.message.from_user = cb.from_user; await cmd_stats(cb.message); await cb.answer()
 @router.callback_query(F.data == "admin_report")
-async def admin_report_cb(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔", show_alert=True)
-        return
-    fake_msg = callback.message
-    fake_msg.from_user = callback.from_user
-    await cmd_report(fake_msg)
-    await callback.answer()
-
-
+async def a_report(cb: CallbackQuery):
+    cb.message.from_user = cb.from_user; await cmd_report(cb.message); await cb.answer()
 @router.callback_query(F.data == "admin_export")
-async def admin_export_cb(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔", show_alert=True)
-        return
-    fake_msg = callback.message
-    fake_msg.from_user = callback.from_user
-    await cmd_export(fake_msg)
-    await callback.answer()
-
-
+async def a_export(cb: CallbackQuery):
+    cb.message.from_user = cb.from_user; await cmd_export(cb.message); await cb.answer()
 @router.callback_query(F.data == "admin_dashboard")
-async def admin_dashboard_cb(callback: CallbackQuery):
-    await callback.answer(
-        "🌐 Dashboard: serveringiz IP manzili:5050\n"
-        "Masalan: http://localhost:5050",
-        show_alert=True,
-    )
+async def a_dash(cb: CallbackQuery):
+    await cb.answer("Dashboard: server_ip:5050", show_alert=True)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  MAMNUNLIK TEKSHIRUVI
-# ══════════════════════════════════════════════════════════════════════
+# ── Satisfaction ─────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("satisfied_"))
-async def on_satisfied(callback: CallbackQuery):
-    fid = int(callback.data.split("_")[1])
-    db.set_followup_satisfied(fid, satisfied=True)
-    await callback.message.edit_text(
-        "✅ <b>Ajoyib!</b>\n\nMamnunligingiz biz uchun eng katta mukofot!\nBiz doim siz va farzandingiz uchun ishlaymiz. 🙏\n\n"
-        f"💫 {CENTER_NAME} — sizning ishonchli hamkoringiz!",
-        parse_mode=ParseMode.HTML,
-    )
-    await callback.answer("Rahmat!")
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, f"✅ Follow-up #{fid}: Ota-ona <b>MAMNUN</b>.", parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
-
+async def on_satisfied(cb: CallbackQuery):
+    fid = int(cb.data.split("_")[1])
+    db.set_followup_satisfied(fid, True)
+    lang = db.get_followup_lang_by_id(fid) or "uz_lat"
+    await cb.message.edit_text(t("satisfied_response", lang, center=CENTER_NAME), parse_mode=ParseMode.HTML)
+    await cb.answer()
+    for a in ADMIN_IDS:
+        try: await bot.send_message(a, f"\u2705 Follow-up #{fid}: <b>MAMNUN</b>", parse_mode=ParseMode.HTML)
+        except: pass
 
 @router.callback_query(F.data.startswith("unsatisfied_"))
-async def on_unsatisfied(callback: CallbackQuery, state: FSMContext):
-    fid = int(callback.data.split("_")[1])
-    db.set_followup_satisfied(fid, satisfied=False)
-    await callback.message.edit_text(
-        "😔 Tushundik, uzr so'raymiz.\n\n"
-        "Iltimos, hozirgi muammoingiz haqida batafsil yozing.\n\n"
-        "📌 Ism ko'rinsinmi yoki anonim bo'lasizmi?",
-        reply_markup=anonymous_keyboard(),
-    )
+async def on_unsatisfied(cb: CallbackQuery, state: FSMContext):
+    fid = int(cb.data.split("_")[1])
+    db.set_followup_satisfied(fid, False)
+    lang = db.get_followup_lang_by_id(fid) or "uz_lat"
+    await cb.message.edit_text(t("unsatisfied_response", lang), reply_markup=anonymous_keyboard(lang))
     await state.set_state(FeedbackFlow.choosing_anonymous)
-    await callback.answer()
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, f"⚠️ Follow-up #{fid}: Ota-ona <b>MAMNUN EMAS</b>. Yangi feedback yozmoqda.", parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
+    await state.update_data(lang=lang)
+    await cb.answer()
+    for a in ADMIN_IDS:
+        try: await bot.send_message(a, f"\u26a0\ufe0f Follow-up #{fid}: <b>MAMNUN EMAS</b>", parse_mode=ParseMode.HTML)
+        except: pass
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  "YANA FEEDBACK" TUGMASI + CATCH-ALL
-# ══════════════════════════════════════════════════════════════════════
+# ── Again + Catch-all ────────────────────────────────────────────────
 
 @router.callback_query(F.data == "again")
-async def on_again(callback: CallbackQuery, state: FSMContext):
+async def on_again(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    user = callback.from_user
-    db.upsert_user(user.id, user.username, user.first_name, user.last_name)
-    if db.is_banned(user.id):
-        await callback.message.edit_text("⛔ Siz bloklangansiz.")
+    db.upsert_user(cb.from_user.id, cb.from_user.username, cb.from_user.first_name, cb.from_user.last_name)
+    if db.is_banned(cb.from_user.id):
+        await cb.message.edit_text("\u26d4 Bloklangansiz.")
         return
-    await callback.message.edit_text(
-        "📌 Ism ko\'rinsinmi yoki anonim bo\'lasizmi?",
-        reply_markup=anonymous_keyboard(),
+    await cb.message.edit_text(
+        "\U0001f310 Tilni tanlang / \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u044f\u0437\u044b\u043a / \u0422\u0438\u043b\u043d\u0438 \u0442\u0430\u043d\u043b\u0430\u043d\u0433",
+        reply_markup=language_keyboard(),
     )
-    await state.set_state(FeedbackFlow.choosing_anonymous)
-    await callback.answer()
-
+    await state.set_state(FeedbackFlow.choosing_language)
+    await cb.answer()
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def catch_all_text(message: types.Message, state: FSMContext):
-    await message.answer(
-        "Feedback qoldirish uchun /start bosing 👇",
+async def catch_text(message: types.Message):
+    await message.answer("Feedback uchun /start bosing",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📝 Feedback yozish", callback_data="again")]
-        ]),
-    )
-
+            [InlineKeyboardButton(text="\U0001f4dd Feedback", callback_data="again")]]))
 
 @router.message(F.voice)
-async def catch_all_voice(message: types.Message, state: FSMContext):
-    await message.answer(
-        "Ovozli feedback uchun avval /start bosing 👇",
+async def catch_voice(message: types.Message):
+    await message.answer("Avval /start bosing",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📝 Feedback yozish", callback_data="again")]
-        ]),
-    )
+            [InlineKeyboardButton(text="\U0001f4dd Feedback", callback_data="again")]]))
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  KUNLIK HISOBOT (SCHEDULER)
-# ══════════════════════════════════════════════════════════════════════
+# ── Scheduler + Main ─────────────────────────────────────────────────
 
 async def daily_report_scheduler():
-    """Har kuni belgilangan vaqtda adminga hisobot yuborish"""
     while True:
         now = datetime.now()
         target = now.replace(hour=REPORT_HOUR, minute=REPORT_MINUTE, second=0)
         if now >= target:
             target = target.replace(day=target.day + 1)
-
-        wait_seconds = (target - now).total_seconds()
-        logger.info(f"Keyingi hisobot: {target} ({wait_seconds:.0f} soniya)")
-        await asyncio.sleep(wait_seconds)
-
+        await asyncio.sleep((target - now).total_seconds())
         try:
-            feedbacks = db.get_feedbacks_since(hours=24)
-            report = await generate_daily_report(feedbacks, GROQ_API_KEY)
-            for admin_id in ADMIN_IDS:
-                try:
-                    await bot.send_message(
-                        admin_id,
-                        f"📋 <b>Kunlik Hisobot — {datetime.now().strftime('%Y-%m-%d')}</b>\n\n{report}",
-                        parse_mode=ParseMode.HTML,
-                    )
-                except Exception as e:
-                    logger.error(f"Report to admin {admin_id}: {e}")
+            fbs = db.get_feedbacks_since(hours=24)
+            r = await generate_daily_report(fbs, GROQ_API_KEY)
+            for a in ADMIN_IDS:
+                try: await bot.send_message(a, f"\U0001f4cb <b>Hisobot - {datetime.now().strftime('%Y-%m-%d')}</b>\n\n{r}", parse_mode=ParseMode.HTML)
+                except: pass
         except Exception as e:
-            logger.error(f"Daily report error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  MAIN
-# ══════════════════════════════════════════════════════════════════════
+            logger.error(f"Report error: {e}")
 
 async def main():
     db.create_tables()
-    logger.info(f"🚀 {CENTER_NAME} Feedback Bot ishga tushdi!")
-    logger.info(f"📋 Adminlar: {ADMIN_IDS}")
-    logger.info(f"📚 Kurslar: {COURSES}")
-    logger.info(f"⏰ Kunlik hisobot: {REPORT_HOUR}:{REPORT_MINUTE:02d}")
-
-    # Kunlik hisobot scheduler'ni ishga tushirish
+    logger.info(f"\U0001f680 {CENTER_NAME} Bot ishga tushdi! Tillar: uz_lat, uz_cyr, ru")
     asyncio.create_task(daily_report_scheduler())
-
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

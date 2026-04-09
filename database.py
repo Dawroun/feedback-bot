@@ -73,6 +73,7 @@ class Database:
                     parent_user_id INTEGER NOT NULL,
                     admin_reply TEXT,
                     parent_satisfied INTEGER,
+                    lang TEXT DEFAULT 'uz_lat',
                     status TEXT DEFAULT 'pending',
                     created_at TEXT DEFAULT (datetime('now')),
                     replied_at TEXT,
@@ -89,6 +90,11 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_feedbacks_created
                     ON feedbacks(created_at);
             """)
+            # Migration: lang ustunini qo'shish (agar mavjud bo'lmasa)
+            try:
+                conn.execute("ALTER TABLE followups ADD COLUMN lang TEXT DEFAULT 'uz_lat'")
+            except Exception:
+                pass  # Ustun allaqachon mavjud
 
     # ══════════════════════════════════════════════════════════════
     #  FOYDALANUVCHILAR
@@ -334,10 +340,11 @@ class Database:
             return [dict(r) for r in rows]
 
     # ══════════════════════════════════════════════════════════════
-    #  FOLLOW-UP
+    #  FOLLOW-UP (salbiy feedbacklarga qayta aloqa)
     # ══════════════════════════════════════════════════════════════
 
     def create_followup(self, feedback_id: int, parent_user_id: int) -> int:
+        """Salbiy feedback uchun follow-up yaratish"""
         with self._conn() as conn:
             cursor = conn.execute(
                 "INSERT INTO followups (feedback_id, parent_user_id) VALUES (?, ?)",
@@ -345,7 +352,7 @@ class Database:
             )
             return cursor.lastrowid
 
-    def get_followup_by_feedback(self, feedback_id: int):
+    def get_followup_by_feedback(self, feedback_id: int) -> Optional[dict]:
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM followups WHERE feedback_id = ?",
@@ -353,7 +360,8 @@ class Database:
             ).fetchone()
             return dict(row) if row else None
 
-    def get_pending_followup(self, parent_user_id: int):
+    def get_pending_followup(self, parent_user_id: int) -> Optional[dict]:
+        """Ota-onaning kutilayotgan follow-up ni olish"""
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT fo.*, f.text as original_feedback, f.course "
@@ -365,6 +373,7 @@ class Database:
             return dict(row) if row else None
 
     def set_followup_reply(self, feedback_id: int, admin_reply: str):
+        """Admin javobini saqlash"""
         with self._conn() as conn:
             conn.execute(
                 "UPDATE followups SET admin_reply=?, status='replied', "
@@ -373,12 +382,39 @@ class Database:
             )
 
     def set_followup_satisfied(self, followup_id: int, satisfied: bool):
+        """Ota-ona mamnunligini belgilash"""
         status = "satisfied" if satisfied else "unsatisfied"
         with self._conn() as conn:
             conn.execute(
                 "UPDATE followups SET parent_satisfied=?, status=? WHERE id=?",
                 (int(satisfied), status, followup_id)
             )
+
+    def save_followup_lang(self, feedback_id: int, lang: str):
+        """Follow-up ga ota-ona tilini saqlash"""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE followups SET lang=? WHERE feedback_id=?",
+                (lang, feedback_id)
+            )
+
+    def get_followup_lang(self, feedback_id: int) -> Optional[str]:
+        """Feedback ID bo'yicha ota-ona tilini olish"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT lang FROM followups WHERE feedback_id=?",
+                (feedback_id,)
+            ).fetchone()
+            return row['lang'] if row else None
+
+    def get_followup_lang_by_id(self, followup_id: int) -> Optional[str]:
+        """Follow-up ID bo'yicha ota-ona tilini olish"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT lang FROM followups WHERE id=?",
+                (followup_id,)
+            ).fetchone()
+            return row['lang'] if row else None
 
     # ══════════════════════════════════════════════════════════════
     #  EXPORT

@@ -11,10 +11,15 @@ from database import Database
 
 logger = logging.getLogger(__name__)
 
+# ══════════════════════════════════════════════════════════════════════
+#  SO'KINISH / HAQORAT SO'ZLARI (faqat aniq so'kinishlar)
+#  False positive bo'lmasligi uchun faqat haqiqiy so'kinishlar
+# ══════════════════════════════════════════════════════════════════════
+
 TOXIC_PATTERNS_UZ = [
     r'\baxmoq\b', r'\beshak\b', r'\bharom\b', r'\bharomzoda\b',
     r'\bjinni\b', r'\btentak\b', r'\bnodon\b',
-    r'\bkal\b', r"\bsig'ir\b", r"\bcho'chqa\b",
+    r'\bkal\b', r'\bsig\'ir\b', r'\bcho\'chqa\b',
     r'\blanja\b', r'\bfohisha\b',
 ]
 
@@ -32,6 +37,10 @@ ALL_TOXIC_PATTERNS = TOXIC_PATTERNS_UZ + TOXIC_PATTERNS_RU + TOXIC_PATTERNS_EN
 
 
 def check_toxicity(text: str) -> dict:
+    """
+    So'kinish tekshiruvi (faqat lokal regex).
+    Groq AI o'zbek tilini yaxshi tushunmagani uchun faqat lokal filtr ishlatiladi.
+    """
     text_lower = text.lower().strip()
     matched = []
 
@@ -63,6 +72,13 @@ def check_toxicity(text: str) -> dict:
 
 
 class ModerationSystem:
+    """
+    Moderatsiya tizimi:
+    - So'kinish filtri (lokal regex)
+    - Rate limiting
+    - Ogohlantirish / ban tizimi
+    """
+
     def __init__(self, db: Database, max_daily: int = 5, max_warnings: int = 3):
         self.db = db
         self.max_daily = max_daily
@@ -78,6 +94,7 @@ class ModerationSystem:
 
     async def process_moderation(self, user_id: int, text: str,
                                   groq_api_key: str = None) -> dict:
+        # 1. Ban tekshiruvi
         if self.db.is_banned(user_id):
             return {
                 "allowed": False,
@@ -87,6 +104,7 @@ class ModerationSystem:
                 "toxicity": None,
             }
 
+        # 2. Rate limit
         if not self.check_rate_limit(user_id):
             return {
                 "allowed": False,
@@ -96,8 +114,10 @@ class ModerationSystem:
                 "toxicity": None,
             }
 
+        # 3. So'kinish tekshiruvi (faqat lokal — AI ishonchsiz)
         toxicity = check_toxicity(text)
 
+        # 4. Toxic bo'lsa — ogohlantirish / ban
         if toxicity['is_toxic']:
             warning_count = self.db.add_warning(
                 user_id,
@@ -118,6 +138,7 @@ class ModerationSystem:
                 "toxicity": toxicity,
             }
 
+        # 5. Hammasi yaxshi
         return {
             "allowed": True,
             "reason": None,
