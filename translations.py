@@ -16,14 +16,14 @@ TRANSLATIONS = {
     "welcome": {
         "uz_lat": (
             "Assalomu alaykum, {name}! 👋\n\n"
-            "<b>{center}</b> feedback botiga xush kelibsiz!\n\n"
+            "<b>{center}</b> fikr-mulohaza botiga xush kelibsiz!\n\n"
             "Siz bu yerda o'quv markazi haqida fikr-mulohazangizni "
             "qoldirishingiz mumkin.\n\n"
             "📌 Ism ko'rinsinmi yoki anonim bo'lasizmi?"
         ),
         "uz_cyr": (
             "Ассалому алайкум, {name}! 👋\n\n"
-            "<b>{center}</b> фидбек ботига хуш келибсиз!\n\n"
+            "<b>{center}</b> фикр-мулоҳаза ботига хуш келибсиз!\n\n"
             "Сиз бу ерда ўқув маркази ҳақида фикр-мулоҳазангизни "
             "қолдиришингиз мумкин.\n\n"
             "📌 Исм кўринсинми ёки аноним бўласизми?"
@@ -61,13 +61,13 @@ TRANSLATIONS = {
             "📚 Kurs: <b>{course}</b>\n\n"
             "Endi fikringizni yuboring:\n"
             "🎤 <b>Ovozli habar</b> yoki ✏️ <b>Matn</b> yozing.\n\n"
-            "💡 Bugun yana {remaining} ta feedback yuborishingiz mumkin."
+            "💡 Bugun yana {remaining} ta fikr-mulohaza yuborishingiz mumkin."
         ),
         "uz_cyr": (
             "📚 Курс: <b>{course}</b>\n\n"
             "Энди фикрингизни юборинг:\n"
             "🎤 <b>Овозли хабар</b> ёки ✏️ <b>Матн</b> ёзинг.\n\n"
-            "💡 Бугун яна {remaining} та фидбек юборишингиз мумкин."
+            "💡 Бугун яна {remaining} та фикр-мулоҳаза юборишингиз мумкин."
         ),
         "ru": (
             "📚 Курс: <b>{course}</b>\n\n"
@@ -186,8 +186,8 @@ TRANSLATIONS = {
 
     # ── Tugma matnlari ───────────────────────────────────────────
     "btn_again": {
-        "uz_lat": "📝 Yana feedback yozish",
-        "uz_cyr": "📝 Яна фидбек ёзиш",
+        "uz_lat": "📝 Yana fikr-mulohaza yozish",
+        "uz_cyr": "📝 Яна фикр-мулоҳаза ёзиш",
         "ru": "📝 Написать ещё отзыв",
     },
 
@@ -302,13 +302,13 @@ TRANSLATIONS = {
 
     # ── Catch-all ────────────────────────────────────────────────
     "catch_all": {
-        "uz_lat": "Feedback qoldirish uchun /start bosing 👇",
-        "uz_cyr": "Фидбек қолдириш учун /start босинг 👇",
+        "uz_lat": "Fikr-mulohaza qoldirish uchun /start bosing 👇",
+        "uz_cyr": "Фикр-мулоҳаза қолдириш учун /start босинг 👇",
         "ru": "Чтобы оставить отзыв, нажмите /start 👇",
     },
     "btn_write_feedback": {
-        "uz_lat": "📝 Feedback yozish",
-        "uz_cyr": "📝 Фидбек ёзиш",
+        "uz_lat": "📝 Fikr-mulohaza yozish",
+        "uz_cyr": "📝 Фикр-мулоҳаза ёзиш",
         "ru": "📝 Написать отзыв",
     },
 

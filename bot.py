@@ -306,7 +306,7 @@ async def _notify_admins(user, text, analysis, course, is_anon, fb_id):
     sender = "Anonim" if is_anon else f"{user.first_name} (@{user.username or '?'})"
     emoji = "\U0001f6a8" if analysis.get('urgency') == 'high' else "\u26a0\ufe0f"
     alert = (
-        f"{emoji} <b>YANGI SALBIY FEEDBACK #{fb_id}</b>\n"
+        f"{emoji} <b>YANGI SALBIY FIKR-MULOHAZA #{fb_id}</b>\n"
         f"\U0001f464 Kimdan: {sender}\n"
         f"\U0001f4da Kurs: {course}\n"
         f"\U0001f4dd Matn: {text[:300]}\n"
@@ -497,15 +497,15 @@ async def on_again(cb: CallbackQuery, state: FSMContext):
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def catch_text(message: types.Message):
-    await message.answer("Feedback uchun /start bosing",
+    await message.answer("Fikr-mulohaza uchun /start bosing",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4dd Feedback", callback_data="again")]]))
+            [InlineKeyboardButton(text="\U0001f4dd Fikr-mulohaza", callback_data="again")]]))
 
 @router.message(F.voice)
 async def catch_voice(message: types.Message):
     await message.answer("Avval /start bosing",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4dd Feedback", callback_data="again")]]))
+            [InlineKeyboardButton(text="\U0001f4dd Fikr-mulohaza", callback_data="again")]]))
 
 
 # ── Scheduler + Main ─────────────────────────────────────────────────
