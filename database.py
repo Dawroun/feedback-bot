@@ -67,6 +67,19 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS followups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feedback_id INTEGER NOT NULL,
+                    parent_user_id INTEGER NOT NULL,
+                    admin_reply TEXT,
+                    parent_satisfied INTEGER,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    replied_at TEXT,
+                    FOREIGN KEY (feedback_id) REFERENCES feedbacks(id),
+                    FOREIGN KEY (parent_user_id) REFERENCES users(user_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_feedbacks_user
                     ON feedbacks(user_id);
                 CREATE INDEX IF NOT EXISTS idx_feedbacks_sentiment
@@ -319,6 +332,53 @@ class Database:
                 ORDER BY f.created_at DESC
             """, (since,)).fetchall()
             return [dict(r) for r in rows]
+
+    # ══════════════════════════════════════════════════════════════
+    #  FOLLOW-UP
+    # ══════════════════════════════════════════════════════════════
+
+    def create_followup(self, feedback_id: int, parent_user_id: int) -> int:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "INSERT INTO followups (feedback_id, parent_user_id) VALUES (?, ?)",
+                (feedback_id, parent_user_id)
+            )
+            return cursor.lastrowid
+
+    def get_followup_by_feedback(self, feedback_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM followups WHERE feedback_id = ?",
+                (feedback_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_pending_followup(self, parent_user_id: int):
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT fo.*, f.text as original_feedback, f.course "
+                "FROM followups fo JOIN feedbacks f ON fo.feedback_id = f.id "
+                "WHERE fo.parent_user_id = ? AND fo.status = 'pending' "
+                "ORDER BY fo.created_at DESC LIMIT 1",
+                (parent_user_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def set_followup_reply(self, feedback_id: int, admin_reply: str):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE followups SET admin_reply=?, status='replied', "
+                "replied_at=datetime('now') WHERE feedback_id=?",
+                (admin_reply, feedback_id)
+            )
+
+    def set_followup_satisfied(self, followup_id: int, satisfied: bool):
+        status = "satisfied" if satisfied else "unsatisfied"
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE followups SET parent_satisfied=?, status=? WHERE id=?",
+                (int(satisfied), status, followup_id)
+            )
 
     # ══════════════════════════════════════════════════════════════
     #  EXPORT
