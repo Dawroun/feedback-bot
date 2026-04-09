@@ -121,6 +121,22 @@ def again_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def satisfaction_keyboard(fid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, mamnunman", callback_data=f"satisfied_{fid}"),
+         InlineKeyboardButton(text="❌ Yo'q", callback_data=f"unsatisfied_{fid}")]
+    ])
+
+
+def get_sentiment_response(sentiment: str, course: str) -> str:
+    if sentiment == "positive":
+        return ("✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Ishonchingiz uchun katta rahmat! 🙏\n" "Farzandingiz biz bilan ajoyib natijalarga erishadi!\n\n" f"💪 {CENTER_NAME} jamoasi har doim eng yaxshisini beradi!")
+    elif sentiment == "negative":
+        return ("📝 <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Bu holatdan juda afsusdamiz 😔\n" "Siz aytgan fikrlarni albatta inobatga olamiz.\n" "Tez fursatda muammoni hal qilib sizga qayta aloqaga chiqamiz.\n\n" "Sabr-toqatingiz uchun rahmat! 🙏")
+    else:
+        return ("✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n" f"📚 Kurs: {course}\n\n" "Fikringiz uchun minnatdormiz! 🙏\n" "Farzandingizning porloq kelajagi uchun birgalikda harakat qilamiz.\n\n" f"💫 {CENTER_NAME} — bilim va muvaffaqiyat maskani!")
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  /start — ASOSIY BOSHLASH
 # ══════════════════════════════════════════════════════════════════════
@@ -257,6 +273,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
 
         # 6. Admin ogohlantirish
         if analysis.get('sentiment') == 'negative' or analysis.get('urgency') == 'high':
+            db.create_followup(fb_id, user.id)
             await _notify_admins(user, text, analysis, course, is_anonymous, fb_id)
 
     except Exception as e:
@@ -318,6 +335,7 @@ async def handle_text_feedback(message: types.Message, state: FSMContext):
         )
 
         if analysis.get('sentiment') == 'negative' or analysis.get('urgency') == 'high':
+            db.create_followup(fb_id, user.id)
             await _notify_admins(user, text, analysis, course, is_anonymous, fb_id)
 
     except Exception as e:
@@ -387,8 +405,9 @@ async def _notify_admins(user, text, analysis, course, is_anonymous, fb_id):
         f"📅 Vaqt: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
     )
 
+    alert += ("\n━━━━━━━━━━━━━━━━━━━━━\n" "📞 <b>BU OTA-ONAGA QAYTA ALOQAGA CHIQISH SHART!</b>\n" f"Hal qilganingizdan keyin: <code>/reply {fb_id} Javob</code>\n")
     if is_anonymous:
-        alert += f"\n🔍 Ochish uchun: /unmask {fb_id}"
+        alert += f"\n🔍 Kimligini bilish: /unmask {fb_id}"
 
     for admin_id in ADMIN_IDS:
         try:
