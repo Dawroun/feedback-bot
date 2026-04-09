@@ -161,6 +161,15 @@ class Database:
             ).fetchone()
             return row['cnt']
 
+    def reset_warnings(self, user_id: int):
+        """Foydalanuvchining barcha ogohlantirishlarini o'chirish"""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM warnings WHERE user_id = ?", (user_id,))
+            conn.execute(
+                "UPDATE users SET is_banned=0, ban_reason=NULL, ban_until=NULL WHERE user_id=?",
+                (user_id,)
+            )
+
     # ══════════════════════════════════════════════════════════════
     #  FEEDBACKLAR
     # ══════════════════════════════════════════════════════════════
