@@ -263,10 +263,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
         )
 
         await processing_msg.edit_text(
-            f"✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n"
-            f"📚 Kurs: {course}\n\n"
-            "Rahmat, sizning fikringiz biz uchun juda muhim! 🙏\n"
-            f"{CENTER_NAME} jamoasi sizga minnatdor!",
+            get_sentiment_response(analysis['sentiment'], course),
             parse_mode=ParseMode.HTML,
             reply_markup=again_keyboard(),
         )
@@ -326,10 +323,7 @@ async def handle_text_feedback(message: types.Message, state: FSMContext):
         )
 
         await processing_msg.edit_text(
-            f"✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n"
-            f"📚 Kurs: {course}\n\n"
-            "Rahmat, sizning fikringiz biz uchun juda muhim! 🙏\n"
-            f"{CENTER_NAME} jamoasi sizga minnatdor!",
+            get_sentiment_response(analysis['sentiment'], course),
             parse_mode=ParseMode.HTML,
             reply_markup=again_keyboard(),
         )
