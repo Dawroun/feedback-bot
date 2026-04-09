@@ -587,6 +587,43 @@ async def cmd_reset_warnings(message: types.Message):
     await message.answer(f"✅ Foydalanuvchi {user_id} ogohlantirishlari tozalandi.")
 
 
+
+@router.message(Command("reply"))
+async def cmd_reply(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⛔ Faqat adminlar uchun.")
+        return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer("Foydalanish: /reply <feedback_id> <javob>\nMasalan: /reply 5 Muammoni hal qildik")
+        return
+    try:
+        fb_id = int(parts[1])
+    except ValueError:
+        await message.answer("⚠️ Noto'g'ri ID.")
+        return
+    reply_text = parts[2].strip()
+    fb = db.get_feedback_by_id(fb_id)
+    if not fb:
+        await message.answer(f"❌ #{fb_id} topilmadi.")
+        return
+    followup = db.get_followup_by_feedback(fb_id)
+    if not followup:
+        await message.answer(f"❌ #{fb_id} uchun follow-up yo'q.")
+        return
+    db.set_followup_reply(fb_id, reply_text)
+    try:
+        await bot.send_message(
+            followup['parent_user_id'],
+            f"📬 <b>Hurmatli ota-ona!</b>\n\nSiz yozgan fikr-mulohaza inobatga olindi:\n\n💬 <i>{reply_text}</i>\n\nEndi bu masaladan mamnunmisiz?",
+            parse_mode=ParseMode.HTML,
+            reply_markup=satisfaction_keyboard(followup['id']),
+        )
+        await message.answer(f"✅ Javob #{fb_id} feedback egasiga yuborildi!")
+    except Exception as e:
+        await message.answer(f"⚠️ Xabar yuborilmadi: {e}")
+
+
 @router.message(Command("report"))
 async def cmd_report(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -655,6 +692,46 @@ async def admin_dashboard_cb(callback: CallbackQuery):
         "Masalan: http://localhost:5050",
         show_alert=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MAMNUNLIK TEKSHIRUVI
+# ══════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("satisfied_"))
+async def on_satisfied(callback: CallbackQuery):
+    fid = int(callback.data.split("_")[1])
+    db.set_followup_satisfied(fid, satisfied=True)
+    await callback.message.edit_text(
+        "✅ <b>Ajoyib!</b>\n\nMamnunligingiz biz uchun eng katta mukofot!\nBiz doim siz va farzandingiz uchun ishlaymiz. 🙏\n\n"
+        f"💫 {CENTER_NAME} — sizning ishonchli hamkoringiz!",
+        parse_mode=ParseMode.HTML,
+    )
+    await callback.answer("Rahmat!")
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"✅ Follow-up #{fid}: Ota-ona <b>MAMNUN</b>.", parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
+
+@router.callback_query(F.data.startswith("unsatisfied_"))
+async def on_unsatisfied(callback: CallbackQuery, state: FSMContext):
+    fid = int(callback.data.split("_")[1])
+    db.set_followup_satisfied(fid, satisfied=False)
+    await callback.message.edit_text(
+        "😔 Tushundik, uzr so'raymiz.\n\n"
+        "Iltimos, hozirgi muammoingiz haqida batafsil yozing.\n\n"
+        "📌 Ism ko'rinsinmi yoki anonim bo'lasizmi?",
+        reply_markup=anonymous_keyboard(),
+    )
+    await state.set_state(FeedbackFlow.choosing_anonymous)
+    await callback.answer()
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"⚠️ Follow-up #{fid}: Ota-ona <b>MAMNUN EMAS</b>. Yangi feedback yozmoqda.", parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════
