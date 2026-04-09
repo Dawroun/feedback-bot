@@ -115,6 +115,12 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def again_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Yana feedback yozish", callback_data="again")]
+    ])
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  /start — ASOSIY BOSHLASH
 # ══════════════════════════════════════════════════════════════════════
@@ -241,9 +247,12 @@ async def handle_voice(message: types.Message, state: FSMContext):
         )
 
         await processing_msg.edit_text(
-            "✅ Fikr-mulohazangiz qabul qilindi!\n"
-            "Rahmat, sizning fikringiz biz uchun juda muhim! 🙏\n\n"
-            "Yana feedback qoldirmoqchimisiz? /start bosing."
+            f"✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n"
+            f"📚 Kurs: {course}\n\n"
+            "Rahmat, sizning fikringiz biz uchun juda muhim! 🙏\n"
+            f"{CENTER_NAME} jamoasi sizga minnatdor!",
+            parse_mode=ParseMode.HTML,
+            reply_markup=again_keyboard(),
         )
 
         # 6. Admin ogohlantirish
@@ -300,9 +309,12 @@ async def handle_text_feedback(message: types.Message, state: FSMContext):
         )
 
         await processing_msg.edit_text(
-            "✅ Fikr-mulohazangiz qabul qilindi!\n"
-            "Rahmat! 🙏\n\n"
-            "Yana feedback qoldirmoqchimisiz? /start bosing."
+            f"✅ <b>Fikr-mulohazangiz qabul qilindi!</b>\n\n"
+            f"📚 Kurs: {course}\n\n"
+            "Rahmat, sizning fikringiz biz uchun juda muhim! 🙏\n"
+            f"{CENTER_NAME} jamoasi sizga minnatdor!",
+            parse_mode=ParseMode.HTML,
+            reply_markup=again_keyboard(),
         )
 
         if analysis.get('sentiment') == 'negative' or analysis.get('urgency') == 'high':
@@ -538,6 +550,24 @@ async def on_unban(callback: CallbackQuery):
     await callback.answer("Blokdan chiqarildi!")
 
 
+@router.message(Command("resetwarnings"))
+async def cmd_reset_warnings(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⛔ Faqat adminlar uchun.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("Foydalanish: /resetwarnings <user_id>")
+        return
+    try:
+        user_id = int(parts[1])
+    except ValueError:
+        await message.answer("⚠️ Noto\'g\'ri ID.")
+        return
+    db.reset_warnings(user_id)
+    await message.answer(f"✅ Foydalanuvchi {user_id} ogohlantirishlari tozalandi.")
+
+
 @router.message(Command("report"))
 async def cmd_report(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -605,6 +635,46 @@ async def admin_dashboard_cb(callback: CallbackQuery):
         "🌐 Dashboard: serveringiz IP manzili:5050\n"
         "Masalan: http://localhost:5050",
         show_alert=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  "YANA FEEDBACK" TUGMASI + CATCH-ALL
+# ══════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data == "again")
+async def on_again(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = callback.from_user
+    db.upsert_user(user.id, user.username, user.first_name, user.last_name)
+    if db.is_banned(user.id):
+        await callback.message.edit_text("⛔ Siz bloklangansiz.")
+        return
+    await callback.message.edit_text(
+        "📌 Ism ko\'rinsinmi yoki anonim bo\'lasizmi?",
+        reply_markup=anonymous_keyboard(),
+    )
+    await state.set_state(FeedbackFlow.choosing_anonymous)
+    await callback.answer()
+
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def catch_all_text(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Feedback qoldirish uchun /start bosing 👇",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Feedback yozish", callback_data="again")]
+        ]),
+    )
+
+
+@router.message(F.voice)
+async def catch_all_voice(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Ovozli feedback uchun avval /start bosing 👇",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Feedback yozish", callback_data="again")]
+        ]),
     )
 
 
