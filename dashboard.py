@@ -7,7 +7,7 @@ Bot bilan bir vaqtda ishga tushadi.
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, date
 from flask import Flask, render_template, jsonify, request
 from database import Database
 from dotenv import load_dotenv
@@ -15,10 +15,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+
+# PostgreSQL datetime/date ni JSON ga o'girish
+class CustomJSONProvider(app.json_provider_class):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+app.json_provider_class = CustomJSONProvider
+app.json = CustomJSONProvider(app)
+
 db = Database("feedbacks.db")
 
 CENTER_NAME = os.getenv("CENTER_NAME", "O'quv Markazi")
 COURSES = [c.strip() for c in os.getenv("COURSES", "Umumiy").split(",")]
+
+
+def _serialize(obj):
+    """date/datetime objektlarni string ga o'girish"""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return str(obj)
 
 
 @app.route("/")
@@ -34,16 +52,14 @@ def index():
         courses=COURSES,
         stats=stats,
         course_stats=course_stats,
-        daily=json.dumps(daily),
+        daily=json.dumps(daily, default=_serialize),
         recent=recent,
     )
 
 
 @app.route("/api/stats")
 def api_stats():
-    course = request.args.get("course")
-    days = request.args.get("days", type=int)
-    stats = db.get_stats(course=course, days=days)
+    stats = db.get_stats()
     return jsonify(stats)
 
 
