@@ -202,7 +202,7 @@
                 <tbody id="feedbackBody">
                     {% for fb in recent %}
                     <tr>
-                        <td>{{ fb.created_at[:16] }}</td>
+                        <td>{{ fb.created_at.strftime('%Y-%m-%d %H:%M') if fb.created_at else '' }}</td>
                         <td>{{ fb.course or '—' }}</td>
                         <td><span class="badge {{ fb.sentiment }}">{{ fb.sentiment }}</span></td>
                         <td>{{ fb.text[:120] }}{{ '...' if fb.text|length > 120 else '' }}</td>
