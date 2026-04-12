@@ -3,7 +3,7 @@ O'quv Markazi Feedback Bot (v3 — ko'p tilli)
 """
 
 import os, logging, asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types, F, Router
@@ -35,6 +35,9 @@ MAX_DAILY = int(os.getenv("MAX_DAILY_FEEDBACKS", "5"))
 MAX_WARNINGS = int(os.getenv("MAX_WARNINGS", "3"))
 REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", "20"))
 REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", "0"))
+
+# Toshkent vaqti (UTC+5)
+TASHKENT_TZ = timezone(timedelta(hours=5))
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN kerak!")
@@ -312,7 +315,7 @@ async def _notify_admins(user, text, analysis, course, is_anon, fb_id):
         f"\U0001f4dd Matn: {text[:300]}\n"
         f"\U0001f916 Xulosa: {analysis.get('summary', '-')}\n"
         f"\U0001f525 Muhimlik: {analysis.get('urgency', 'low')}\n"
-        f"\U0001f4c5 Vaqt: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"\U0001f4c5 Vaqt: {datetime.now(TASHKENT_TZ).strftime('%Y-%m-%d %H:%M')}\n\n"
         f"\U0001f4de <b>BU OTA-ONAGA QAYTA ALOQAGA CHIQISH SHART!</b>\n"
         f"<code>/reply {fb_id} Javob matni</code>\n"
     )
@@ -512,7 +515,7 @@ async def catch_voice(message: types.Message):
 
 async def daily_report_scheduler():
     while True:
-        now = datetime.now()
+        now = datetime.now(TASHKENT_TZ)
         target = now.replace(hour=REPORT_HOUR, minute=REPORT_MINUTE, second=0)
         if now >= target:
             target = target.replace(day=target.day + 1)
@@ -521,7 +524,7 @@ async def daily_report_scheduler():
             fbs = db.get_feedbacks_since(hours=24)
             r = await generate_daily_report(fbs, GROQ_API_KEY)
             for a in ADMIN_IDS:
-                try: await bot.send_message(a, f"\U0001f4cb <b>Hisobot - {datetime.now().strftime('%Y-%m-%d')}</b>\n\n{r}", parse_mode=ParseMode.HTML)
+                try: await bot.send_message(a, f"\U0001f4cb <b>Hisobot - {datetime.now(TASHKENT_TZ).strftime('%Y-%m-%d')}</b>\n\n{r}", parse_mode=ParseMode.HTML)
                 except: pass
         except Exception as e:
             logger.error(f"Report error: {e}")
